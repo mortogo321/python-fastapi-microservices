@@ -3,7 +3,7 @@
 ## Development
 ```bash
 source env/bin/activate
-pip install -i app/requirements.txt
+pip install -r app/requirements.txt
 
 uvicorn app.main:app --reload
 ```
