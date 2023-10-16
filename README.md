@@ -17,10 +17,10 @@ Docs: http://localhost:8000/docs
 
 ### Up
 ```bash
-docker compose -f docker/docker-compose.yaml up -d --build
+docker compose -f docker/docker-compose.development.yaml up -d --build
 ```
 
 ### Down
 ```bash
-docker compose -f docker/docker-compose.yaml up --rmi all --remove-orphans
+docker compose -f docker/docker-compose.development.yaml up --rmi all --remove-orphans
 ```
