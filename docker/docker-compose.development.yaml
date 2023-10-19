@@ -3,7 +3,7 @@ services:
   api:
     build:
       context: ../
-      dockerfile: docker/Dockerfile.development
+      dockerfile: docker/Dockerfile
     command: sh -c "uvicorn app.main:app --reload --port=8000 --host=0.0.0.0"
     restart: unless-stopped
     ports:
