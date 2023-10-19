@@ -1,9 +1,7 @@
-from os import environ as env
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.product import Product
+from app.api.modal import Product
 
 app = FastAPI()
 
@@ -19,7 +17,7 @@ app.add_middleware(
 
 @app.get("/")
 async def welcome():
-    return {"status": True, "message": "OK"}
+    return {"status": True, "message": "Product OK"}
 
 
 @app.get("/products", response_model=list[Product])

@@ -1,6 +1,6 @@
 from redis_om import HashModel
 
-from app.redis import database
+from app.libs.redis import database
 
 
 class Product(HashModel):
