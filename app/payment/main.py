@@ -1,5 +1,11 @@
-from fastapi import FastAPI
+import time
+from os import environ as env
+
+import requests
+from fastapi import BackgroundTasks, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.payment.order import Order, OrderRequest
 
 app = FastAPI()
 
@@ -16,3 +22,42 @@ app.add_middleware(
 @app.get("/")
 async def welcome():
     return {"status": True, "message": "Payment OK"}
+
+
+@app.get("/orders", response_model=list[Order])
+def getOrders():
+    return [getOrder(pk) for pk in Order.all_pks()]
+
+
+@app.post("/orders", response_model=Order)
+def createOrder(request: OrderRequest, tasks: BackgroundTasks):
+    req = requests.get("{}/products/{}".format(env["API_HOST"], request.id))
+    product = req.json()
+    order = Order(
+        product_id=product["pk"],
+        price=product["price"],
+        fee=0.2 * product["price"],
+        total=1.2 * product["price"],
+        quantity=request.quantity,
+        status="pending",
+    )
+    order.save()
+
+    tasks.add_task(completeOrder, order)
+
+    return order
+
+
+@app.get("/orders/{pk}", response_model=Order)
+def getOrderById(pk: str):
+    return getOrder(pk)
+
+
+def getOrder(pk: str):
+    return Order.get(pk)
+
+
+def completeOrder(order: Order):
+    time.sleep(5)
+    order.status = "completed"
+    order.save()
