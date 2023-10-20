@@ -5,6 +5,7 @@ import requests
 from fastapi import BackgroundTasks, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.libs.redis import database
 from app.payment.order import Order, OrderRequest
 
 app = FastAPI()
@@ -61,3 +62,4 @@ def completeOrder(order: Order):
     time.sleep(5)
     order.status = "completed"
     order.save()
+    database.xadd("order_completed", order.model_dump(), "*")
