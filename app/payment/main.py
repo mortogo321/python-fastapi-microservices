@@ -32,7 +32,7 @@ def getOrders():
 
 @app.post("/orders", response_model=Order)
 def createOrder(request: OrderRequest, tasks: BackgroundTasks):
-    req = requests.get("{}/products/{}".format(env["API_HOST"], request.id))
+    req = requests.get(f"{env['API_HOST']}/products/{request.id}")
     product = req.json()
     order = Order(
         product_id=product["pk"],
