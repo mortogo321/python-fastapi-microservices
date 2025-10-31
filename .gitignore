@@ -1,30 +1,109 @@
-.idea
-.ipynb_checkpoints
-.mypy_cache
-.vscode
-__pycache__
-.pytest_cache
-htmlcov
-dist
-site
-.coverage
-coverage.xml
-.netlify
-test.db
-log.txt
-Pipfile.lock
-env3.*
-env
-docs_build
-site_build
-venv
-docs.zip
-archive.zip
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# vim temporary files
+# Virtual Environments
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+env3.*/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
 *~
 .*.sw?
-.cache
+.project
+.pydevproject
+.settings/
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+.tox/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# Jupyter
+.ipynb_checkpoints
+*.ipynb
+
+# Logs
+*.log
+log.txt
+logs/
+
+# Environment variables
+.env
+.env.local
+*.env.local
+
+# Database
+*.db
+*.sqlite3
+test.db
+
+# Redis
+dump.rdb
+appendonly.aof
+
+# Docker
+.dockerignore
 
 # macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Build artifacts
+*.tar.gz
+*.zip
+archive.zip
+docs.zip
+docs_build/
+site_build/
+site/
+
+# Project specific
+Pipfile.lock
+.netlify
+.cache/

@@ -1,45 +1,102 @@
 name: python-fastapi
+
+networks:
+  microservices:
+    driver: bridge
+
 services:
   api:
+    container_name: fastapi-product-api
     build:
       context: ../
       dockerfile: docker/Dockerfile
+      target: runtime
+      args:
+        PYTHON_VERSION: 3.13
     command: sh -c "uvicorn app.api.main:app --reload --port=8000 --host=0.0.0.0"
     restart: unless-stopped
     ports:
-      - 8000:8000
+      - "8000:8000"
     env_file:
       - ../.env.development
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
     volumes:
-      - ../:/app
+      - ../app:/app/app:cached
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+    networks:
+      - microservices
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   payment:
+    container_name: fastapi-payment-service
     build:
       context: ../
       dockerfile: docker/Dockerfile
+      target: runtime
+      args:
+        PYTHON_VERSION: 3.13
     command: sh -c "uvicorn app.payment.main:app --reload --port=8001 --host=0.0.0.0"
     restart: unless-stopped
     ports:
-      - 8001:8001
+      - "8001:8001"
     env_file:
       - ../.env.development
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
     volumes:
-      - ../:/app
+      - ../app:/app/app:cached
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    networks:
+      - microservices
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8001/', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   redis:
-    image: redis:alpine
-    command: sh -c "redis-server --save 20 1 --loglevel warning --appendonly yes --requirepass $$REDIS_PASSWORD"
+    container_name: fastapi-redis
+    image: redis:7-alpine
+    command: >
+      redis-server
+      --save 60 1
+      --loglevel warning
+      --appendonly yes
+      --appendfsync everysec
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
     restart: unless-stopped
     ports:
-      - 6379:6379
+      - "6379:6379"
     env_file:
       - ../.env.development
     volumes:
-      - cache:/data
+      - redis_data:/data
+    networks:
+      - microservices
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
 volumes:
-  cache:
+  redis_data:
+    driver: local
