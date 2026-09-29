@@ -1,5 +1,6 @@
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.product import Product
 from app.libs.logger import setup_logger
 from app.libs.redis import redis_client
+from app.middleware.error_handler import ErrorHandlerMiddleware
+from app.middleware.rate_limiter import RateLimiterMiddleware
+from app.middleware.request_logger import RequestLoggerMiddleware
 
 logger = setup_logger(__name__)
 
@@ -28,34 +32,52 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="Product API",
     description="Microservice for managing products",
-    version="2.0.0",
+    version="2.1.0",
     lifespan=lifespan,
 )
 
-# CORS middleware
-origins = ["*"]
+# NOTE: wildcard origins cannot be combined with credentials — keep
+# allow_credentials=False while allowing all origins for local demo use.
+# Set explicit origins via reverse proxy in production.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
+app.add_middleware(RequestLoggerMiddleware)
+app.add_middleware(ErrorHandlerMiddleware)
+app.add_middleware(RateLimiterMiddleware, requests_per_minute=120)
 
 
-@app.get("/", tags=["Health"])
-async def health_check() -> dict[str, str | bool]:
-    """Health check endpoint."""
+def _health_payload(service: str, message: str) -> dict[str, Any]:
+    return {"status": True, "message": message, "service": service}
+
+
+async def _check_health(service: str, message: str) -> dict[str, Any]:
+    """Shared health logic (Redis ping)."""
     try:
-        # Test Redis connection
         await redis_client.client.ping()
-        return {"status": True, "message": "Product API is healthy", "service": "product-api"}
+        return _health_payload(service, message)
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Service unhealthy - Redis connection failed",
-        )
+        ) from e
+
+
+@app.get("/", tags=["Health"])
+async def health_check() -> dict[str, Any]:
+    """Health check endpoint (root, kept for backwards compatibility)."""
+    return await _check_health("product-api", "Product API is healthy")
+
+
+@app.get("/api/health", tags=["Health"])
+async def api_health_check() -> dict[str, Any]:
+    """Health check endpoint (namespaced alias for probes/gateways)."""
+    return await _check_health("product-api", "Product API is healthy")
 
 
 @app.get("/products", response_model=list[Product], tags=["Products"])
@@ -77,7 +99,7 @@ async def get_all_products() -> list[Product]:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch products",
-        )
+        ) from e
 
 
 @app.post(
@@ -99,7 +121,7 @@ async def create_product(product: Product) -> Product:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create product",
-        )
+        ) from e
 
 
 @app.get("/products/{pk}", response_model=Product, tags=["Products"])
@@ -123,7 +145,7 @@ async def get_product_by_id(pk: str) -> Product:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch product",
-        )
+        ) from e
 
 
 @app.delete("/products/{pk}", status_code=status.HTTP_204_NO_CONTENT, tags=["Products"])
@@ -146,4 +168,4 @@ async def delete_product(pk: str) -> None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete product",
-        )
+        ) from e

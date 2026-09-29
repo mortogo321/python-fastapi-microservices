@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     debug: bool = False
     log_level: str = "INFO"
 
+    # Order processing
+    order_complete_delay_seconds: float = 5.0
+    product_api_timeout_seconds: float = 10.0
+
 
 # Global settings instance
 settings = Settings()

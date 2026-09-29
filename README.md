@@ -1,5 +1,10 @@
 # Python FastAPI Microservices
 
+[![CI](https://github.com/mortogo321/python-fastapi-microservices/actions/workflows/ci.yml/badge.svg)](https://github.com/mortogo321/python-fastapi-microservices/actions/workflows/ci.yml)
+[![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/fastapi-0.141-green.svg)](https://fastapi.tiangolo.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A small microservices sample demonstrating service boundaries, async inter-service HTTP calls, event publishing, and background job processing with FastAPI.
 
 ## What's Inside
@@ -20,7 +25,9 @@ A small microservices sample demonstrating service boundaries, async inter-servi
 ## Quickstart
 
 ```bash
+set -a; source .env.development; set +a  # exposes REDIS_PASSWORD for Compose
 docker compose -f docker/docker-compose.development.yaml up -d --build
+# or simply: make up
 ```
 
 - Product API: http://localhost:8000/docs
@@ -38,7 +45,16 @@ uvicorn app.api.main:app --reload --port=8000
 uvicorn app.payment.main:app --reload --port=8001
 ```
 
-A local Redis instance and a `.env` file (see `.env.development`) are required for local runs.
+A local Redis instance and a `.env` file (see `.env.example`, e.g. `.env.development`) are required for local runs.
+
+### Development
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+make check   # ruff + mypy strict + pytest
+```
+
+Health endpoints: `/` (legacy) and `/api/health` on both services.
 
 ### Example requests
 
@@ -61,8 +77,11 @@ app/
 ├── api/          # Product API service (main.py, product.py)
 ├── payment/      # Payment service (main.py, order.py)
 ├── libs/         # Shared config, structured logging, and Redis client
-└── requirements.txt
+├── middleware/   # Error handler, rate limiter, request logger
+├── requirements.txt
+tests/            # pytest suite (mocked Redis — no infra needed)
 docker/
 ├── Dockerfile
-└── docker-compose.development.yaml
+├── docker-compose.development.yaml
+└── docker-compose.production.yaml
 ```

@@ -1,0 +1,92 @@
+name: python-fastapi-prod
+
+networks:
+  microservices:
+    driver: bridge
+
+services:
+  api:
+    container_name: fastapi-product-api
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+      target: runtime
+    command: ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.env.production
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PORT=8000
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - microservices
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  payment:
+    container_name: fastapi-payment-service
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+      target: runtime
+    command: ["uvicorn", "app.payment.main:app", "--host", "0.0.0.0", "--port", "8001"]
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    env_file:
+      - ../.env.production
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PORT=8001
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    networks:
+      - microservices
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  redis:
+    container_name: fastapi-redis-prod
+    image: redis:8-alpine
+    command: >
+      redis-server
+      --save 60 1
+      --loglevel warning
+      --appendonly yes
+      --appendfsync everysec
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    env_file:
+      - ../.env.production
+    volumes:
+      - redis_data_prod:/data
+    networks:
+      - microservices
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  redis_data_prod:
+    driver: local

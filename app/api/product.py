@@ -1,8 +1,18 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Product(BaseModel):
     """Product model with validation."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "name": "Laptop",
+                "price": 999.99,
+                "quantity": 10,
+            }
+        }
+    )
 
     pk: str | None = None  # Primary key, set after saving
     name: str = Field(..., min_length=1, max_length=200, description="Product name")
@@ -16,12 +26,3 @@ class Product(BaseModel):
         if not v.strip():
             raise ValueError("Product name cannot be empty")
         return v.strip()
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "name": "Laptop",
-                "price": 999.99,
-                "quantity": 10,
-            }
-        }

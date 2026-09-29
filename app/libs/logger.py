@@ -1,17 +1,18 @@
 import logging
 import sys
 
-from pythonjsonlogger import jsonlogger
+from pythonjsonlogger.json import JsonFormatter
 
 from app.libs.config import settings
 
 
 def setup_logger(name: str) -> logging.Logger:
-    """Configure structured JSON logging."""
+    """Configure structured JSON logging (idempotent under reload)."""
     logger = logging.getLogger(name)
     logger.setLevel(settings.log_level)
+    logger.propagate = False
 
-    # Remove existing handlers
+    # Remove existing handlers (uvicorn --reload re-imports modules)
     logger.handlers.clear()
 
     # Create console handler
@@ -19,7 +20,7 @@ def setup_logger(name: str) -> logging.Logger:
     handler.setLevel(settings.log_level)
 
     # JSON formatter for structured logging
-    formatter = jsonlogger.JsonFormatter(
+    formatter = JsonFormatter(
         "%(asctime)s %(name)s %(levelname)s %(message)s %(pathname)s %(lineno)d",
         rename_fields={"levelname": "level", "asctime": "timestamp", "pathname": "file"},
     )

@@ -1,38 +1,31 @@
-# Multi-stage build for optimized production image
-ARG PYTHON_VERSION=3.13
-
-# Build stage
-FROM python:${PYTHON_VERSION}-slim as builder
+# Multi-stage build — single image serves both services (CMD overridden per service).
+FROM python:3.13-slim AS builder
 
 WORKDIR /app
 
-# Install build dependencies
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends gcc && \
-    rm -rf /var/lib/apt/lists/*
-
-# Copy and install dependencies
-COPY app/requirements.txt ./app/
+COPY requirements.txt pyproject.toml ./
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r app/requirements.txt
+    pip install --no-cache-dir --prefix=/install -r requirements.txt
 
-# Runtime stage
-FROM python:${PYTHON_VERSION}-slim as runtime
+FROM python:3.13-slim AS runtime
 
 WORKDIR /app
 
-# Copy installed packages from builder
-COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=8000
 
-# Copy application code
-COPY . .
+COPY --from=builder /install /usr/local
+COPY app ./app
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
-
-# Create non-root user
 RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /app
 USER appuser
+
+EXPOSE 8000 8001
+
+# Per-service probes override PORT (8000 = api, 8001 = payment).
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD python -c "import os,urllib.request;urllib.request.urlopen('http://localhost:'+os.environ.get('PORT','8000')+'/api/health',timeout=5)"
+
+CMD ["sh", "-c", "uvicorn app.api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

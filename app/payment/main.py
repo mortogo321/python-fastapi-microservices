@@ -1,6 +1,7 @@
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import Any
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, status
@@ -9,6 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.libs.config import settings
 from app.libs.logger import setup_logger
 from app.libs.redis import redis_client
+from app.middleware.error_handler import ErrorHandlerMiddleware
+from app.middleware.rate_limiter import RateLimiterMiddleware
+from app.middleware.request_logger import RequestLoggerMiddleware
 from app.payment.order import Order, OrderRequest, OrderStatus
 
 logger = setup_logger(__name__)
@@ -31,34 +35,48 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="Payment Service",
     description="Microservice for processing orders and payments",
-    version="2.0.0",
+    version="2.1.0",
     lifespan=lifespan,
 )
 
-# CORS middleware
-origins = ["*"]
+# NOTE: wildcard origins cannot be combined with credentials — keep
+# allow_credentials=False while allowing all origins for local demo use.
+# Set explicit origins via reverse proxy in production.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+app.add_middleware(RequestLoggerMiddleware)
+app.add_middleware(ErrorHandlerMiddleware)
+app.add_middleware(RateLimiterMiddleware, requests_per_minute=120)
 
 
-@app.get("/", tags=["Health"])
-async def health_check() -> dict[str, str | bool]:
-    """Health check endpoint."""
+async def _check_health(service: str, message: str) -> dict[str, Any]:
+    """Shared health logic (Redis ping)."""
     try:
-        # Test Redis connection
         await redis_client.client.ping()
-        return {"status": True, "message": "Payment service is healthy", "service": "payment"}
+        return {"status": True, "message": message, "service": service}
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Service unhealthy - Redis connection failed",
-        )
+        ) from e
+
+
+@app.get("/", tags=["Health"])
+async def health_check() -> dict[str, Any]:
+    """Health check endpoint (root, kept for backwards compatibility)."""
+    return await _check_health("payment", "Payment service is healthy")
+
+
+@app.get("/api/health", tags=["Health"])
+async def api_health_check() -> dict[str, Any]:
+    """Health check endpoint (namespaced alias for probes/gateways)."""
+    return await _check_health("payment", "Payment service is healthy")
 
 
 @app.get("/orders", response_model=list[Order], tags=["Orders"])
@@ -80,7 +98,7 @@ async def get_all_orders() -> list[Order]:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch orders",
-        )
+        ) from e
 
 
 @app.post("/orders", response_model=Order, status_code=status.HTTP_201_CREATED, tags=["Orders"])
@@ -90,24 +108,37 @@ async def create_order(request: OrderRequest, background_tasks: BackgroundTasks)
         logger.info(f"Creating order for product: {request.id}")
 
         # Fetch product from Product API using httpx
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(f"{settings.api_host}/products/{request.id}")
+        try:
+            async with httpx.AsyncClient(timeout=settings.product_api_timeout_seconds) as client:
+                response = await client.get(f"{settings.api_host}/products/{request.id}")
+        except httpx.TimeoutException as e:
+            logger.error(f"Product API timeout: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="Product API request timed out",
+            ) from e
+        except httpx.HTTPError as e:
+            logger.error(f"Product API connection failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to reach product API",
+            ) from e
 
-            if response.status_code == 404:
-                logger.warning(f"Product not found: {request.id}")
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Product with ID {request.id} not found",
-                )
+        if response.status_code == 404:
+            logger.warning(f"Product not found: {request.id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Product with ID {request.id} not found",
+            )
 
-            if response.status_code != 200:
-                logger.error(f"Failed to fetch product: {response.status_code}")
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail="Failed to fetch product from API",
-                )
+        if response.status_code != 200:
+            logger.error(f"Failed to fetch product: {response.status_code}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to fetch product from API",
+            )
 
-            product = response.json()
+        product = response.json()
 
         # Validate product availability
         if product.get("quantity", 0) < request.quantity:
@@ -123,7 +154,7 @@ async def create_order(request: OrderRequest, background_tasks: BackgroundTasks)
 
         # Create order
         order = Order(
-            product_id=product["pk"],
+            product_id=product.get("pk") or request.id,
             price=price,
             fee=fee,
             total=total,
@@ -149,7 +180,7 @@ async def create_order(request: OrderRequest, background_tasks: BackgroundTasks)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create order",
-        )
+        ) from e
 
 
 @app.get("/orders/{pk}", response_model=Order, tags=["Orders"])
@@ -173,7 +204,7 @@ async def get_order_by_id(pk: str) -> Order:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch order",
-        )
+        ) from e
 
 
 async def complete_order(order_pk: str) -> None:
@@ -181,8 +212,8 @@ async def complete_order(order_pk: str) -> None:
     try:
         logger.info(f"Processing order completion for: {order_pk}")
 
-        # Simulate payment processing delay
-        await asyncio.sleep(5)
+        # Simulate payment processing delay (configurable for tests)
+        await asyncio.sleep(settings.order_complete_delay_seconds)
 
         # Fetch the order
         order = await redis_client.get_model(order_pk, "order", Order)
@@ -190,15 +221,13 @@ async def complete_order(order_pk: str) -> None:
             logger.error(f"Order not found for completion: {order_pk}")
             return
 
-        # Update order status
+        # Update order status in place (same Redis key — no duplicate)
         order.status = OrderStatus.COMPLETED
         order.pk = order_pk
-
-        # Save updated order
-        await redis_client.save_model(order, "order")
+        await redis_client.update_model(order_pk, order, "order")
 
         # Publish event to Redis stream
-        await redis_client.xadd("order_completed", order.model_dump())
+        await redis_client.xadd("order_completed", order.model_dump(mode="json"))
 
         logger.info(f"Order completed: {order_pk}")
 
@@ -210,6 +239,6 @@ async def complete_order(order_pk: str) -> None:
             if order:
                 order.status = OrderStatus.FAILED
                 order.pk = order_pk
-                await redis_client.save_model(order, "order")
+                await redis_client.update_model(order_pk, order, "order")
         except Exception as save_error:
             logger.error(f"Failed to update order status to failed: {save_error}")
